@@ -40,12 +40,12 @@ from wget import download
 import g2p_id
 from themes import MetafisikTheme  # Impor tema custom dari themes.py
 from g2p_id.scripts.tts import (
-    g2p,
     config_file,
     model_file,
     model_url,
     cache_dir,
     text_normalization,
+    tts,
     )
 
 
@@ -114,30 +114,21 @@ def create_filename(speaker):
 # Fungsi untuk menghasilkan suara dengan progress bar
 def gen_voice(text, speaker_label, speed, language, progress=gr.Progress()):
     speaker = speaker_mapping.get(speaker_label, default_speaker_name)
-    progress(0, desc="Normalisasi teks dari HTML")
+    progress(0, desc="Normalisasi teks")
     text = html.unescape(text)
-    sleep(2)
-    progress(0.2, desc="Normalisasi teks agar bagus dibacanya")
-    text = text_normalization(text)
-    sleep(3)
-    progress(0.4, desc="Ubah teks sesuai pengucapan")
-    text_to_tts = g2p(text)
-    if not os.path.exists(model_file):
-        progress(0.5, desc="Unduh model bahasa sekitar 10 menit")
-        download(model_url, out=cache_dir)
     output_file = create_filename(speaker)
-    cmd = [bin_tts, '--text', text_to_tts,
-           '--model_path', model_file,
-           '--config_path', config_file,
-           '--speaker_idx', speaker,
-           '--out_path', output_file]
-    progress(0.7, desc="Ubah menjadi file suara")
-    result = run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"Error: {result.stderr}")
+    
+    progress(0.2, desc="Menghasilkan audio...")
+    # Kecepatan belum didukung secara langsung di tts() function 
+    # namun kita bisa menambahkan fungsionalitas ini nanti jika perlu.
+    # Untuk saat ini kita gunakan fungsi tts() yang sudah dioptimasi.
+    result_code = tts(text, speaker=speaker, output_file=output_file)
+    
+    if result_code != 0:
+        print(f"Error during TTS generation")
         return None
+        
     progress(1, desc="Selesai")
-    sleep(2)
     return output_file
 
 

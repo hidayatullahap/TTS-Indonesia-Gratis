@@ -8,16 +8,13 @@ import wget
 import g2p_id
 from simpleaudio import WaveObject
 from platformdirs import user_cache_dir
+from TTS.api import TTS
 from .terbilang import terbilang
-
 
 model_url = 'https://github.com/Wikidepia/indonesian-tts/releases/download/v1.2/checkpoint_1260000-inference.pth'
 cache_dir = user_cache_dir('g2p_id')
 os.makedirs(cache_dir, exist_ok=True)
 model_file = os.path.join(cache_dir, 'checkpoint_1260000-inference.pth')
-
-bin_dir = os.path.split(sys.executable)[0]
-bin_tts = os.path.join(bin_dir, 'tts')
 
 data_dir = os.path.join(g2p_id.__path__[0], 'data')
 config_base_file = os.path.join(data_dir, 'config.json')
@@ -33,8 +30,25 @@ if not os.path.exists(config_file):
     with open(config_file, 'w') as f:
         f.write(s)
 
-g2p = g2p_id.G2P()
+_g2p_instance = None
+_tts_instance = None
 
+def get_g2p():
+    global _g2p_instance
+    if _g2p_instance is None:
+        _g2p_instance = g2p_id.G2P()
+    return _g2p_instance
+
+def get_tts():
+    global _tts_instance
+    if _tts_instance is None:
+        download_model_if_not_exists()
+        _tts_instance = TTS()
+        _tts_instance.load_tts_model_by_path(
+            model_path=model_file,
+            config_path=config_file
+        )
+    return _tts_instance
 
 def download_model_if_not_exists():
     if not os.path.exists(model_file):
@@ -88,15 +102,19 @@ def text_normalization(content):
 
 
 def tts(content: str, speaker='ardi', output_file='tts_drat.wav') -> int:
-    text = text_normalization(content)
-    text_to_tts = g2p(text)
-    download_model_if_not_exists()
-    cmd = [bin_tts, '--text', text_to_tts,
-           '--model_path', model_file,
-           '--config_path', config_file,
-           '--speaker_idx', speaker,
-           '--out_path', output_file]
-    return call(cmd)
+    try:
+        text = text_normalization(content)
+        text_to_tts = get_g2p()(text)
+        engine = get_tts()
+        engine.tts_to_file(
+            text=text_to_tts,
+            speaker=speaker,
+            file_path=output_file
+        )
+        return 0
+    except Exception as e:
+        print(f"Error during TTS: {e}")
+        return 1
 
 
 def main(argv=sys.argv[1:]):
