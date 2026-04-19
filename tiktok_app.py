@@ -10,6 +10,7 @@ from TikTokLive import TikTokLiveClient
 from TikTokLive.events import CommentEvent, ConnectEvent, DisconnectEvent
 from g2p_id.scripts.tts import tts
 from simpleaudio import WaveObject
+from pydub import AudioSegment
 from uuid import uuid4
 
 # Speaker Mapping from app.py
@@ -31,11 +32,11 @@ class TikTokTTSApp(ctk.CTk):
         super().__init__()
 
         self.title("TikTok Live TTS Desktop")
-        self.geometry("600x550")
+        self.geometry("600x650")
         
         # UI Elements
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(4, weight=1)
+        self.grid_rowconfigure(5, weight=1)
 
         self.label_title = ctk.CTkLabel(self, text="TikTok Live TTS Integration", font=ctk.CTkFont(size=20, weight="bold"))
         self.label_title.grid(row=0, column=0, padx=20, pady=20)
@@ -64,9 +65,21 @@ class TikTokTTSApp(ctk.CTk):
         self.combo_speaker.set("Ardi - Lembut")
         self.combo_speaker.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
 
+        # Volume Control
+        self.frame_volume = ctk.CTkFrame(self)
+        self.frame_volume.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
+        self.frame_volume.grid_columnconfigure(1, weight=1)
+
+        self.label_volume = ctk.CTkLabel(self.frame_volume, text="Volume: 100%")
+        self.label_volume.grid(row=0, column=0, padx=10, pady=10)
+
+        self.slider_volume = ctk.CTkSlider(self.frame_volume, from_=0, to=200, number_of_steps=20, command=self.update_volume_label)
+        self.slider_volume.set(100)
+        self.slider_volume.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+
         # Control Buttons
         self.frame_controls = ctk.CTkFrame(self)
-        self.frame_controls.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
+        self.frame_controls.grid(row=4, column=0, padx=20, pady=10, sticky="ew")
         self.frame_controls.grid_columnconfigure((0, 1), weight=1)
 
         self.btn_start = ctk.CTkButton(self.frame_controls, text="Start Connection", command=self.start_app, fg_color="green", hover_color="darkgreen")
@@ -77,7 +90,7 @@ class TikTokTTSApp(ctk.CTk):
 
         # Log Area (Tabview)
         self.tabview = ctk.CTkTabview(self, height=250)
-        self.tabview.grid(row=4, column=0, padx=20, pady=10, sticky="nsew")
+        self.tabview.grid(row=5, column=0, padx=20, pady=10, sticky="nsew")
         self.tabview.add("Chat Logs")
         self.tabview.add("Speaking Logs")
 
@@ -90,7 +103,7 @@ class TikTokTTSApp(ctk.CTk):
         self.speak_log.configure(state="disabled")
 
         self.status_label = ctk.CTkLabel(self, text="Status: Disconnected", text_color="gray")
-        self.status_label.grid(row=5, column=0, padx=20, pady=5)
+        self.status_label.grid(row=6, column=0, padx=20, pady=5)
 
         # Backend Logic Setup
         self.queue = queue.Queue()
@@ -98,6 +111,9 @@ class TikTokTTSApp(ctk.CTk):
         self.client = None
         self.worker_thread = None
         self.tiktok_thread = None
+
+    def update_volume_label(self, value):
+        self.label_volume.configure(text=f"Volume: {int(value)}%")
 
     def log_chat(self, message):
         self.chat_log.configure(state="normal")
@@ -137,27 +153,46 @@ class TikTokTTSApp(ctk.CTk):
                 self.log_speak(f"Speaking [{user}] ({speaker}): {clean_text}")
                 
                 # Generate unique filename
-                filename = f"live_{str(uuid4())[:8]}.wav"
-                output_path = os.path.join(OUTPUT_DIR, filename)
+                raw_filename = f"raw_{str(uuid4())[:8]}.wav"
+                raw_path = os.path.join(OUTPUT_DIR, raw_filename)
                 
                 # Generate TTS
-                result = tts(f"{user} berkata: {clean_text}", speaker=speaker, output_file=output_path)
+                result = tts(f"{user} berkata: {clean_text}", speaker=speaker, output_file=raw_path)
                 
-                if result == 0 and os.path.exists(output_path):
-                    # Play audio and BLOCK until it's finished
+                if result == 0 and os.path.exists(raw_path):
                     try:
-                        wave_obj = WaveObject.from_wave_file(output_path)
+                        # Process Volume with pydub
+                        audio = AudioSegment.from_wav(raw_path)
+                        
+                        # Calculate gain (dB)
+                        # volume 100% = 0dB change
+                        # slider is 0 to 200
+                        volume_percent = self.slider_volume.get()
+                        if volume_percent <= 0:
+                            gain = -120 # Silent
+                        else:
+                            # Using a simple linear-to-log mapping for volume
+                            import math
+                            gain = 20 * math.log10(volume_percent / 100.0)
+                        
+                        audio = audio.apply_gain(gain)
+                        
+                        processed_filename = f"proc_{str(uuid4())[:8]}.wav"
+                        processed_path = os.path.join(OUTPUT_DIR, processed_filename)
+                        audio.export(processed_path, format="wav")
+
+                        # Play audio and BLOCK until it's finished
+                        wave_obj = WaveObject.from_wave_file(processed_path)
                         play_obj = wave_obj.play()
                         play_obj.wait_done()
-                    except Exception as play_error:
-                        self.log_speak(f"Playback Error: {play_error}")
-                    
-                    # Cleanup file immediately after playing
-                    try:
-                        if os.path.exists(output_path):
-                            os.remove(output_path)
-                    except:
-                        pass
+                        
+                        # Cleanup files
+                        if os.path.exists(raw_path): os.remove(raw_path)
+                        if os.path.exists(processed_path): os.remove(processed_path)
+                        
+                    except Exception as audio_error:
+                        self.log_speak(f"Audio Error: {audio_error}")
+                        if os.path.exists(raw_path): os.remove(raw_path)
                 
                 self.queue.task_done()
                 
