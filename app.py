@@ -119,9 +119,6 @@ def gen_voice(text, speaker_label, speed, language, progress=gr.Progress()):
     output_file = create_filename(speaker)
     
     progress(0.2, desc="Menghasilkan audio...")
-    # Kecepatan belum didukung secara langsung di tts() function 
-    # namun kita bisa menambahkan fungsionalitas ini nanti jika perlu.
-    # Untuk saat ini kita gunakan fungsi tts() yang sudah dioptimasi.
     result_code = tts(text, speaker=speaker, output_file=output_file)
     
     if result_code != 0:
