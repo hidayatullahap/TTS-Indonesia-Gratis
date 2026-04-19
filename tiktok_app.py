@@ -104,49 +104,59 @@ class TikTokTTSApp(ctk.CTk):
         while self.running:
             try:
                 # Use a timeout to occasionally check if self.running is still True
+                # Get the next comment from the queue
                 comment_data = self.queue.get(timeout=1)
                 user, text = comment_data
                 
                 clean_text = self.clean_comment(text)
                 if not clean_text:
+                    self.queue.task_done()
                     continue
                 
-                # Fetch speaker settings on-the-fly
+                # IMPORTANT: Determine speaker settings AT THE START of processing this specific comment
+                # This ensures we don't change speakers mid-generation if the user clicks the UI
                 speaker_label = self.combo_speaker.get()
                 if speaker_label == RANDOM_LABEL:
                     speaker = random.choice(list(SPEAKER_MAPPING.values()))
                 else:
                     speaker = SPEAKER_MAPPING.get(speaker_label, "ardi")
 
-                self.log(f"Speaking [{user}] using {speaker}: {clean_text}")
+                self.log(f"Speaking [{user}] ({speaker}): {clean_text}")
                 
-                filename = f"live_{speaker}_{str(uuid4())[:8]}.wav"
+                # Generate unique filename for this specific comment
+                filename = f"live_{str(uuid4())[:8]}.wav"
                 output_path = os.path.join(OUTPUT_DIR, filename)
                 
-                # Generate TTS
+                # Generate TTS - This uses the in-process singleton model
+                # We pass the specific speaker requested for this comment
                 result = tts(f"{user} berkata: {clean_text}", speaker=speaker, output_file=output_path)
                 
                 if result == 0 and os.path.exists(output_path):
-                    # Play audio and wait until done
+                    # Play audio and BLOCK until it's finished
                     try:
                         wave_obj = WaveObject.from_wave_file(output_path)
                         play_obj = wave_obj.play()
-                        play_obj.wait_done()
+                        play_obj.wait_done() # This line ensures sequential reading
                     except Exception as play_error:
                         self.log(f"Playback Error: {play_error}")
                     
-                    # Cleanup file after playing
+                    # Cleanup file immediately after playing
                     try:
-                        os.remove(output_path)
+                        if os.path.exists(output_path):
+                            os.remove(output_path)
                     except:
                         pass
                 
+                # Mark this specific item as finished before moving to the next
                 self.queue.task_done()
+                
             except queue.Empty:
                 continue
             except Exception as e:
                 if self.running:
                     self.log(f"Worker Error: {e}")
+                    try: self.queue.task_done()
+                    except: pass
 
     def clean_comment(self, text):
         # Remove emojis and unescape HTML
