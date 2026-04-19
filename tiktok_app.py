@@ -75,10 +75,19 @@ class TikTokTTSApp(ctk.CTk):
         self.btn_stop = ctk.CTkButton(self.frame_controls, text="Stop Connection", command=self.stop_app, state="disabled", fg_color="red", hover_color="darkred")
         self.btn_stop.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
 
-        # Log Area
-        self.log_area = ctk.CTkTextbox(self, height=200)
-        self.log_area.grid(row=4, column=0, padx=20, pady=10, sticky="nsew")
-        self.log_area.configure(state="disabled")
+        # Log Area (Tabview)
+        self.tabview = ctk.CTkTabview(self, height=250)
+        self.tabview.grid(row=4, column=0, padx=20, pady=10, sticky="nsew")
+        self.tabview.add("Chat Logs")
+        self.tabview.add("Speaking Logs")
+
+        self.chat_log = ctk.CTkTextbox(self.tabview.tab("Chat Logs"))
+        self.chat_log.pack(expand=True, fill="both")
+        self.chat_log.configure(state="disabled")
+
+        self.speak_log = ctk.CTkTextbox(self.tabview.tab("Speaking Logs"))
+        self.speak_log.pack(expand=True, fill="both")
+        self.speak_log.configure(state="disabled")
 
         self.status_label = ctk.CTkLabel(self, text="Status: Disconnected", text_color="gray")
         self.status_label.grid(row=5, column=0, padx=20, pady=5)
@@ -90,11 +99,17 @@ class TikTokTTSApp(ctk.CTk):
         self.worker_thread = None
         self.tiktok_thread = None
 
-    def log(self, message):
-        self.log_area.configure(state="normal")
-        self.log_area.insert("end", message + "\n")
-        self.log_area.see("end")
-        self.log_area.configure(state="disabled")
+    def log_chat(self, message):
+        self.chat_log.configure(state="normal")
+        self.chat_log.insert("end", message + "\n")
+        self.chat_log.see("end")
+        self.chat_log.configure(state="disabled")
+
+    def log_speak(self, message):
+        self.speak_log.configure(state="normal")
+        self.speak_log.insert("end", message + "\n")
+        self.speak_log.see("end")
+        self.speak_log.configure(state="disabled")
 
     def update_status(self, status, color="gray"):
         self.status_label.configure(text=f"Status: {status}", text_color=color)
@@ -103,7 +118,6 @@ class TikTokTTSApp(ctk.CTk):
         """Background thread to process TTS and play audio sequentially."""
         while self.running:
             try:
-                # Use a timeout to occasionally check if self.running is still True
                 # Get the next comment from the queue
                 comment_data = self.queue.get(timeout=1)
                 user, text = comment_data
@@ -113,22 +127,20 @@ class TikTokTTSApp(ctk.CTk):
                     self.queue.task_done()
                     continue
                 
-                # IMPORTANT: Determine speaker settings AT THE START of processing this specific comment
-                # This ensures we don't change speakers mid-generation if the user clicks the UI
+                # Determine speaker settings
                 speaker_label = self.combo_speaker.get()
                 if speaker_label == RANDOM_LABEL:
                     speaker = random.choice(list(SPEAKER_MAPPING.values()))
                 else:
                     speaker = SPEAKER_MAPPING.get(speaker_label, "ardi")
 
-                self.log(f"Speaking [{user}] ({speaker}): {clean_text}")
+                self.log_speak(f"Speaking [{user}] ({speaker}): {clean_text}")
                 
-                # Generate unique filename for this specific comment
+                # Generate unique filename
                 filename = f"live_{str(uuid4())[:8]}.wav"
                 output_path = os.path.join(OUTPUT_DIR, filename)
                 
-                # Generate TTS - This uses the in-process singleton model
-                # We pass the specific speaker requested for this comment
+                # Generate TTS
                 result = tts(f"{user} berkata: {clean_text}", speaker=speaker, output_file=output_path)
                 
                 if result == 0 and os.path.exists(output_path):
@@ -136,9 +148,9 @@ class TikTokTTSApp(ctk.CTk):
                     try:
                         wave_obj = WaveObject.from_wave_file(output_path)
                         play_obj = wave_obj.play()
-                        play_obj.wait_done() # This line ensures sequential reading
+                        play_obj.wait_done()
                     except Exception as play_error:
-                        self.log(f"Playback Error: {play_error}")
+                        self.log_speak(f"Playback Error: {play_error}")
                     
                     # Cleanup file immediately after playing
                     try:
@@ -147,14 +159,13 @@ class TikTokTTSApp(ctk.CTk):
                     except:
                         pass
                 
-                # Mark this specific item as finished before moving to the next
                 self.queue.task_done()
                 
             except queue.Empty:
                 continue
             except Exception as e:
                 if self.running:
-                    self.log(f"Worker Error: {e}")
+                    self.log_speak(f"Worker Error: {e}")
                     try: self.queue.task_done()
                     except: pass
 
@@ -170,32 +181,31 @@ class TikTokTTSApp(ctk.CTk):
 
         @self.client.on(ConnectEvent)
         async def on_connect(event):
-            self.after(0, lambda: self.log(f"Connected to @{username}"))
+            self.after(0, lambda: self.log_chat(f"SYSTEM: Connected to @{username}"))
             self.after(0, lambda: self.update_status("Connected", "green"))
 
         @self.client.on(DisconnectEvent)
         async def on_disconnect(event):
-            self.after(0, lambda: self.log("Disconnected from TikTok"))
+            self.after(0, lambda: self.log_chat("SYSTEM: Disconnected from TikTok"))
             self.after(0, lambda: self.update_status("Disconnected", "gray"))
             self.after(0, self.reset_ui)
 
         @self.client.on(CommentEvent)
         async def on_comment(event: CommentEvent):
-            # Just put comment info; worker will decide speaker on-the-fly
             self.queue.put((event.user.nickname, event.comment))
-            self.after(0, lambda: self.log(f"Chat: {event.user.nickname}: {event.comment}"))
+            self.after(0, lambda: self.log_chat(f"{event.user.nickname}: {event.comment}"))
 
         try:
             self.client.run()
         except Exception as e:
             if self.running:
-                self.after(0, lambda: self.log(f"Connection Error: {e}"))
+                self.after(0, lambda: self.log_chat(f"SYSTEM: Connection Error: {e}"))
                 self.after(0, self.stop_app)
 
     def start_app(self):
         username = self.entry_user.get().strip()
         if not username:
-            self.log("Error: Please enter a TikTok username.")
+            self.log_chat("SYSTEM: Error - Please enter a TikTok username.")
             return
 
         if username.startswith("@"):
@@ -205,9 +215,8 @@ class TikTokTTSApp(ctk.CTk):
         self.btn_start.configure(state="disabled")
         self.btn_stop.configure(state="normal")
         self.entry_user.configure(state="disabled")
-        # Keep combo_speaker enabled for on-the-fly changes
         
-        self.log(f"Connecting to @{username}...")
+        self.log_chat(f"SYSTEM: Connecting to @{username}...")
         self.update_status("Connecting...", "orange")
 
         # Start TTS Worker
@@ -226,13 +235,13 @@ class TikTokTTSApp(ctk.CTk):
 
     def stop_app(self):
         self.running = False
-        self.log("Stopping connection...")
+        self.log_chat("SYSTEM: Stopping connection...")
         
         if self.client:
             try:
                 self.client.disconnect()
             except Exception as e:
-                self.log(f"Error while disconnecting: {e}")
+                self.log_chat(f"SYSTEM: Error while disconnecting: {e}")
         
         self.reset_ui()
 
