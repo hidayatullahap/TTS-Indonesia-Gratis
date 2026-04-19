@@ -4,6 +4,7 @@ import queue
 import asyncio
 import re
 import html
+import random
 import customtkinter as ctk
 from TikTokLive import TikTokLiveClient
 from TikTokLive.events import CommentEvent, ConnectEvent, DisconnectEvent
@@ -13,12 +14,14 @@ from uuid import uuid4
 
 # Speaker Mapping from app.py
 SPEAKER_MAPPING = {
-    "Wibowo - Jantan": "wibowo",
     "Ardi - Lembut": "ardi",
+    "Wibowo - Jantan": "wibowo",
     "Gadis - Merdu": "gadis",
     "Juminten - Jawa": "JV-00264",
     "Asep - Sunda": "SU-00060"
 }
+
+RANDOM_LABEL = "Randomized - Acak"
 
 OUTPUT_DIR = "outputs"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -56,7 +59,7 @@ class TikTokTTSApp(ctk.CTk):
         self.label_speaker = ctk.CTkLabel(self.frame_speaker, text="Select Speaker:")
         self.label_speaker.grid(row=0, column=0, padx=10, pady=10)
         
-        self.speaker_options = list(SPEAKER_MAPPING.keys())
+        self.speaker_options = list(SPEAKER_MAPPING.keys()) + [RANDOM_LABEL]
         self.combo_speaker = ctk.CTkComboBox(self.frame_speaker, values=self.speaker_options)
         self.combo_speaker.set("Ardi - Lembut")
         self.combo_speaker.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
@@ -102,13 +105,20 @@ class TikTokTTSApp(ctk.CTk):
             try:
                 # Use a timeout to occasionally check if self.running is still True
                 comment_data = self.queue.get(timeout=1)
-                user, text, speaker = comment_data
+                user, text = comment_data
                 
                 clean_text = self.clean_comment(text)
                 if not clean_text:
                     continue
                 
-                self.log(f"Speaking [{user}]: {clean_text}")
+                # Fetch speaker settings on-the-fly
+                speaker_label = self.combo_speaker.get()
+                if speaker_label == RANDOM_LABEL:
+                    speaker = random.choice(list(SPEAKER_MAPPING.values()))
+                else:
+                    speaker = SPEAKER_MAPPING.get(speaker_label, "ardi")
+
+                self.log(f"Speaking [{user}] using {speaker}: {clean_text}")
                 
                 filename = f"live_{speaker}_{str(uuid4())[:8]}.wav"
                 output_path = os.path.join(OUTPUT_DIR, filename)
@@ -125,7 +135,7 @@ class TikTokTTSApp(ctk.CTk):
                     except Exception as play_error:
                         self.log(f"Playback Error: {play_error}")
                     
-                    # Optional: cleanup file after playing
+                    # Cleanup file after playing
                     try:
                         os.remove(output_path)
                     except:
@@ -161,13 +171,11 @@ class TikTokTTSApp(ctk.CTk):
 
         @self.client.on(CommentEvent)
         async def on_comment(event: CommentEvent):
-            speaker_label = self.combo_speaker.get()
-            speaker_id = SPEAKER_MAPPING.get(speaker_label, "ardi")
-            self.queue.put((event.user.nickname, event.comment, speaker_id))
+            # Just put comment info; worker will decide speaker on-the-fly
+            self.queue.put((event.user.nickname, event.comment))
             self.after(0, lambda: self.log(f"Chat: {event.user.nickname}: {event.comment}"))
 
         try:
-            # client.run() is blocking, that's why we run it in a thread
             self.client.run()
         except Exception as e:
             if self.running:
@@ -187,7 +195,7 @@ class TikTokTTSApp(ctk.CTk):
         self.btn_start.configure(state="disabled")
         self.btn_stop.configure(state="normal")
         self.entry_user.configure(state="disabled")
-        self.combo_speaker.configure(state="disabled")
+        # Keep combo_speaker enabled for on-the-fly changes
         
         self.log(f"Connecting to @{username}...")
         self.update_status("Connecting...", "orange")
@@ -204,7 +212,6 @@ class TikTokTTSApp(ctk.CTk):
         self.btn_start.configure(state="normal")
         self.btn_stop.configure(state="disabled")
         self.entry_user.configure(state="normal")
-        self.combo_speaker.configure(state="normal")
         self.update_status("Disconnected", "gray")
 
     def stop_app(self):
@@ -213,7 +220,6 @@ class TikTokTTSApp(ctk.CTk):
         
         if self.client:
             try:
-                # Version 6.6.5 uses disconnect() or close()
                 self.client.disconnect()
             except Exception as e:
                 self.log(f"Error while disconnecting: {e}")
