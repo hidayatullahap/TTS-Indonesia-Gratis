@@ -13,8 +13,7 @@ from .terbilang import terbilang
 
 model_url = 'https://github.com/Wikidepia/indonesian-tts/releases/download/v1.2/checkpoint_1260000-inference.pth'
 cache_dir = user_cache_dir('g2p_id')
-if not os.path.exists(cache_dir):
-    os.mkdir(cache_dir)
+os.makedirs(cache_dir, exist_ok=True)
 model_file = os.path.join(cache_dir, 'checkpoint_1260000-inference.pth')
 
 bin_dir = os.path.split(sys.executable)[0]
