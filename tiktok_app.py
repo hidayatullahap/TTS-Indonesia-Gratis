@@ -157,7 +157,8 @@ class TikTokTTSApp(ctk.CTk):
                 raw_path = os.path.join(OUTPUT_DIR, raw_filename)
                 
                 # Generate TTS
-                result = tts(f"{user} berkata: {clean_text}", speaker=speaker, output_file=raw_path)
+                # result = tts(f"{user} berkata: {clean_text}", speaker=speaker, output_file=raw_path)
+                result = tts(f"{user}: {clean_text}", speaker=speaker, output_file=raw_path)
                 
                 if result == 0 and os.path.exists(raw_path):
                     try:
