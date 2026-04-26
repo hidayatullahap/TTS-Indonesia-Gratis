@@ -44,6 +44,12 @@ def get_tts():
     if _tts_instance is None:
         download_model_if_not_exists()
         _tts_instance = TTS()
+        # Workaround for missing attribute in some versions of TTS
+        if not hasattr(_tts_instance, 'is_multi_speaker'):
+            try:
+                _tts_instance._is_multi_speaker = False
+            except:
+                pass
         _tts_instance.load_tts_model_by_path(
             model_path=model_file,
             config_path=config_file
